@@ -1,3 +1,4 @@
+
 import streamlit as st
 from database import login_user
 
@@ -95,7 +96,9 @@ def show_login():
     )
 
     st.markdown(
-        '<div class="tagline">Verify learning. Identify weaknesses. Improve performance.</div>',
+        '<div class="tagline">'
+        'Verify learning. Identify weaknesses. Improve performance.'
+        '</div>',
         unsafe_allow_html=True
     )
 
@@ -107,7 +110,8 @@ def show_login():
     with st.form("login_form"):
         role = st.selectbox(
             "Login as",
-            ["Student", "Teacher", "Administrator", "Parent"]
+            ["Student", "Teacher", "Parent", "Administrator"],
+            index=0
         )
 
         username = st.text_input("Username")
@@ -121,13 +125,23 @@ def show_login():
         if submitted:
             if not username.strip() or not password:
                 st.error("Please enter your username and password.")
+
             else:
-                user = login_user(username.strip(), password, role)
+                # Parent uses the same existing Student account.
+                auth_role = "Student" if role == "Parent" else role
+
+                user = login_user(
+                    username.strip(),
+                    password,
+                    auth_role
+                )
 
                 if user:
                     st.session_state["user"] = user
                     st.session_state["logged_in"] = True
+                    st.session_state["view_role"] = role
                     st.rerun()
+
                 else:
                     st.error("Invalid username, password, or role.")
 
@@ -135,4 +149,5 @@ def show_login():
 def logout():
     st.session_state["user"] = None
     st.session_state["logged_in"] = False
+    st.session_state["view_role"] = None
     st.rerun()
