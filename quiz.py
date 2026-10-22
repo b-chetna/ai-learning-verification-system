@@ -1,7 +1,9 @@
+
 import streamlit as st
 from datetime import datetime
 
 from database import get_connection
+from ai_service import generate_question_hint
 
 
 def get_published_quizzes(student_id):
@@ -296,6 +298,7 @@ def submit_attempt(student_id, quiz_id, attempt_id, questions):
 
     return score, max_score
 
+
 def get_approved_requiz_request(student_id, quiz_id):
     conn = get_connection()
 
@@ -305,6 +308,28 @@ def get_approved_requiz_request(student_id, quiz_id):
         WHERE student_id = ?
           AND quiz_id = ?
           AND status = 'Approved'
+        ORDER BY id DESC
+        LIMIT 1
+    """, (student_id, quiz_id)).fetchone()
+
+    conn.close()
+
+    return dict(request) if request else None
+
+
+def get_latest_requiz_request(student_id, quiz_id):
+    conn = get_connection()
+
+    request = conn.execute("""
+        SELECT
+            id,
+            status,
+            teacher_remark,
+            requested_at,
+            reviewed_at
+        FROM requiz_requests
+        WHERE student_id = ?
+          AND quiz_id = ?
         ORDER BY id DESC
         LIMIT 1
     """, (student_id, quiz_id)).fetchone()
@@ -388,6 +413,7 @@ def show_attempt_review(attempt_id, questions):
 
             st.divider()
 
+
 def show_student_quizzes(student_id):
     st.subheader("📝 Take Your Quiz")
 
@@ -424,7 +450,9 @@ def show_student_quizzes(student_id):
                 st.success("Quiz submitted successfully!")
 
                 if attempt["max_score"] > 0:
-                    percentage = (attempt["score"] / attempt["max_score"]) * 100
+                    percentage = (
+                        attempt["score"] / attempt["max_score"]
+                    ) * 100
 
                     st.metric(
                         "Your Score",
@@ -440,30 +468,66 @@ def show_student_quizzes(student_id):
                     submitted_questions
                 )
 
-                # Check re-quiz approval
-                approved_request = get_approved_requiz_request(
+                # Show the latest re-quiz request status and teacher remark.
+                latest_request = get_latest_requiz_request(
                     student_id,
                     quiz_id
                 )
 
-                if approved_request:
+                if (
+                    latest_request
+                    and latest_request["status"] == "Approved"
+                ):
                     st.success(
                         "Your teacher has approved your re-quiz request!"
                     )
 
                     if st.button(
                         "🔄 Start Approved Re-quiz",
-                        key=f"start_requiz_{quiz_id}_{approved_request['id']}",
+                        key=(
+                            f"start_requiz_{quiz_id}_"
+                            f"{latest_request['id']}"
+                        ),
                         type="primary",
                         use_container_width=True
                     ):
                         start_attempt(student_id, quiz_id)
 
                         mark_requiz_used(
-                            approved_request["id"]
+                            latest_request["id"]
                         )
 
                         st.rerun()
+
+                elif (
+                    latest_request
+                    and latest_request["status"] == "Rejected"
+                ):
+                    st.error(
+                        "Your re-quiz request was rejected."
+                    )
+
+                    if latest_request["teacher_remark"]:
+                        st.markdown("**Teacher's message:**")
+                        st.info(latest_request["teacher_remark"])
+                    else:
+                        st.caption(
+                            "Your teacher did not provide an additional message."
+                        )
+
+                    if latest_request["reviewed_at"]:
+                        st.caption(
+                            f"Reviewed at: {latest_request['reviewed_at']}"
+                        )
+
+                elif (
+                    latest_request
+                    and latest_request["status"] == "Pending"
+                ):
+                    st.warning(
+                        "Your re-quiz request is waiting for your "
+                        "teacher's review."
+                    )
 
                 else:
                     st.caption(
@@ -483,7 +547,9 @@ def show_student_quizzes(student_id):
                 continue
 
             if availability == "Closed":
-                st.warning("The deadline has passed. You cannot submit this quiz.")
+                st.warning(
+                    "The deadline has passed. You cannot submit this quiz."
+                )
                 continue
 
             if attempt and attempt["status"] == "In Progress":
@@ -549,11 +615,27 @@ def show_student_quizzes(student_id):
                             question
                         )
 
-                        st.info(
-                            "Your help request has been recorded. "
-                            "This version tracks which questions need help; "
-                            "automated AI-generated hints are not connected yet."
+                        option_text = "\n".join(
+                            f"{letter}. "
+                            f"{question['option_' + letter.lower()]}"
+                            for letter in "ABCD"
                         )
+
+                        try:
+                            with st.spinner("Generating a hint..."):
+                                hint = generate_question_hint(
+                                    question["question_text"],
+                                    option_text,
+                                )
+
+                            st.info(f"💡 **AI Hint:** {hint}")
+
+                        except Exception as error:
+                            st.warning(
+                                f"Could not generate an AI hint: {error}. "
+                                "Check that Ollama is running and the "
+                                "llama3.2:1b model is installed."
+                            )
 
                 with marks_col:
                     st.caption(f"Marks: {question['marks']}")

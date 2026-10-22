@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime, date, time, timedelta
 
 from database import get_connection
+from ai_service import generate_quiz_questions
 
 def get_teacher_subjects(teacher_id):
     conn = get_connection()
@@ -1091,6 +1092,98 @@ def show_teacher_dashboard(user):
 
                         st.success("Question added successfully!")
                         st.rerun()
+
+            st.markdown("#### 🤖 Generate Questions with Local AI")
+            st.caption(
+                "Generate draft questions using the local AI model. "
+                "Review every question and answer before publishing."
+            )
+
+            ai_topic_id = st.selectbox(
+                "AI Question Topic",
+                [topic["id"] for topic in topics],
+                format_func=lambda tid: next(
+                    topic["name"]
+                    for topic in topics
+                    if topic["id"] == tid
+                ),
+                key=f"ai_topic_{selected_draft_id}",
+            )
+
+            ai_col1, ai_col2, ai_col3 = st.columns(3)
+
+            with ai_col1:
+                ai_question_count = st.selectbox(
+                    "Number of Questions",
+                    [1, 2, 3, 4, 5],
+                    index=2,
+                    key=f"ai_count_{selected_draft_id}",
+                )
+
+            with ai_col2:
+                ai_difficulty = st.selectbox(
+                    "AI Difficulty",
+                    ["Easy", "Medium", "Hard"],
+                    index=1,
+                    key=f"ai_difficulty_{selected_draft_id}",
+                )
+
+            with ai_col3:
+                ai_marks = st.number_input(
+                    "Marks per Question",
+                    min_value=1,
+                    max_value=100,
+                    value=1,
+                    key=f"ai_marks_{selected_draft_id}",
+                )
+
+            if st.button(
+                "✨ Generate and Add Questions",
+                key=f"generate_ai_questions_{selected_draft_id}",
+                use_container_width=True,
+            ):
+                selected_topic_name = next(
+                    topic["name"]
+                    for topic in topics
+                    if topic["id"] == ai_topic_id
+                )
+
+                try:
+                    with st.spinner("Local AI is generating questions..."):
+                        generated_questions = generate_quiz_questions(
+                            subject_name,
+                            selected_topic_name,
+                            count=ai_question_count,
+                            difficulty=ai_difficulty,
+                        )
+
+                    for generated in generated_questions:
+                        add_question(
+                            selected_draft_id,
+                            ai_topic_id,
+                            generated["question_text"],
+                            generated["option_a"],
+                            generated["option_b"],
+                            generated["option_c"],
+                            generated["option_d"],
+                            generated["correct_answer"],
+                            generated["explanation"],
+                            ai_difficulty,
+                            int(ai_marks),
+                        )
+
+                    st.success(
+                        f"Added {len(generated_questions)} AI-generated "
+                        "questions. Verify all answers before publishing."
+                    )
+                    st.rerun()
+
+                except Exception as error:
+                    st.error(f"Could not generate questions: {error}")
+                    st.info(
+                        "Check that Ollama is running and the "
+                        "llama3.2:1b model is installed."
+                    )
 
             existing_questions = get_quiz_questions(selected_draft_id)
 
